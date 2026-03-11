@@ -6,9 +6,6 @@ import chalk from 'chalk'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const config = {
-    allowedExtensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp',]
-}
 
 const deleteFile = async (folderPath) => {
     try {

@@ -1,6 +1,5 @@
 import { deleteFile } from './removeFile.utils.js'
 
-
 export const ApiError = (message, statusCode) => {
     const error = new Error(message)
     error.statusCode = statusCode

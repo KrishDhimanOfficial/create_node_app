@@ -12,126 +12,123 @@ import ora from 'ora';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-program
-    .name('create-node-app')
-    .description('Scaffold a new Node.js application')
-    .argument('[project-directory]', 'Directory to create the project in')
-    .action(async (projectDirectory) => {
-        let targetDir = projectDirectory;
+// ==========================================
+// Helper Functions
+// ==========================================
 
-        if (!targetDir) {
-            const answers = await inquirer.prompt([
-                {
-                    type: 'input',
-                    name: 'projectDirectory',
-                    message: 'What is your project named?',
-                    default: 'my-app'
-                }
-            ]);
-            targetDir = answers.projectDirectory;
-        }
+async function promptUser(projectDirectory) {
+    let targetDir = projectDirectory;
 
-        const { packageManager, database } = await inquirer.prompt([
+    if (!targetDir) {
+        const answers = await inquirer.prompt([
             {
-                type: 'list',
-                name: 'packageManager',
-                message: 'Which package manager would you like to use?',
-                choices: ['npm', 'yarn', 'pnpm'],
-                default: 'npm'
-            },
-            {
-                type: 'list',
-                name: 'database',
-                message: 'Which database would you like to use?',
-                choices: ['MongoDB (Mongoose)', 'PostgreSQL (Sequelize)', 'None'],
-                default: 'MongoDB (Mongoose)'
+                type: 'input',
+                name: 'projectDirectory',
+                message: 'What is your project named?',
+                default: 'my-app'
             }
         ]);
+        targetDir = answers.projectDirectory;
+    }
 
-        console.log(`\nCreating a new Node.js app in ${chalk.green(path.resolve(targetDir))}\n`);
-
-        const spinner = ora('Copying template files...').start();
-
-        // Copy template
-        const templateDir = path.join(__dirname, '..', 'template');
-        const targetPath = path.resolve(process.cwd(), targetDir);
-
-        if (fs.existsSync(targetPath)) {
-            spinner.fail(`Directory ${targetDir} already exists.`);
-            process.exit(1);
+    const { packageManager, database } = await inquirer.prompt([
+        {
+            type: 'list',
+            name: 'packageManager',
+            message: 'Which package manager would you like to use?',
+            choices: ['npm', 'yarn', 'pnpm'],
+            default: 'npm'
+        },
+        {
+            type: 'list',
+            name: 'database',
+            message: 'Which database would you like to use?',
+            choices: ['MongoDB (Mongoose)', 'PostgreSQL (Sequelize)', 'None'],
+            default: 'MongoDB (Mongoose)'
         }
+    ]);
 
-        fs.mkdirSync(targetPath, { recursive: true });
+    return { targetDir, packageManager, database };
+}
 
-        // Copy all files from template to targetPath
-        const copyRecursiveSync = (src, dest) => {
-            const exists = fs.existsSync(src);
-            const stats = exists && fs.statSync(src);
-            const isDirectory = exists && stats.isDirectory();
-            if (isDirectory) {
-                if (!fs.existsSync(dest)) fs.mkdirSync(dest);
-                fs.readdirSync(src).forEach((childItemName) => {
-                    if (childItemName === 'node_modules') return;
-                    copyRecursiveSync(path.join(src, childItemName), path.join(dest, childItemName));
-                });
-            } else {
-                fs.copyFileSync(src, dest);
-            }
-        };
+function copyTemplateFiles(templateDir, targetPath) {
+    const spinner = ora('Copying template files...').start();
 
-        try {
-            copyRecursiveSync(templateDir, targetPath);
-            spinner.succeed('Template copied successfully.');
-        } catch (err) {
-            spinner.fail('Failed to copy template.');
-            console.error(err);
-            process.exit(1);
+    if (fs.existsSync(targetPath)) {
+        spinner.fail(`Directory ${path.basename(targetPath)} already exists.`);
+        process.exit(1);
+    }
+
+    fs.mkdirSync(targetPath, { recursive: true });
+
+    const copyRecursiveSync = (src, dest) => {
+        const exists = fs.existsSync(src);
+        const stats = exists && fs.statSync(src);
+        if (exists && stats.isDirectory()) {
+            if (!fs.existsSync(dest)) fs.mkdirSync(dest);
+            fs.readdirSync(src).forEach((child) => {
+                if (child === 'node_modules') return;
+                copyRecursiveSync(path.join(src, child), path.join(dest, child));
+            });
+        } else {
+            fs.copyFileSync(src, dest);
         }
+    };
 
-        // Modify target package.json
-        const packageJsonPath = path.join(targetPath, 'package.json');
-        if (fs.existsSync(packageJsonPath)) {
-            const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-            pkg.name = path.basename(targetPath);
+    try {
+        copyRecursiveSync(templateDir, targetPath);
+        spinner.succeed('Template copied successfully.');
+    } catch (err) {
+        spinner.fail('Failed to copy template.');
+        console.error(err);
+        process.exit(1);
+    }
+}
 
-            // Setup database dependencies and files
-            const dbConfigPath = path.join(targetPath, 'config', 'db.config.js');
-            const targetConfigDir = path.dirname(dbConfigPath);
+function configureDatabase(targetPath, database) {
+    const packageJsonPath = path.join(targetPath, 'package.json');
+    if (!fs.existsSync(packageJsonPath)) return;
 
-            if (database === 'MongoDB (Mongoose)') {
-                pkg.dependencies = pkg.dependencies || {};
-                pkg.dependencies.mongoose = '^8.0.0';
-                
-                const mongooseContent = `import mongoose from "mongoose"
-                const options = {
-                    serverSelectionTimeoutMS: 10000,
-                    dbName: '',
-                }
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    pkg.name = path.basename(targetPath);
 
-                const connectDB = async () => {
-                    try {
-                        await mongoose.connect('', options)
-                        console.log(\`✅ MongoDB connected!\`)
+    const dbConfigPath = path.join(targetPath, 'config', 'db.config.js');
+    const targetConfigDir = path.dirname(dbConfigPath);
+    if (!fs.existsSync(targetConfigDir)) {
+        fs.mkdirSync(targetConfigDir, { recursive: true });
+    }
 
-                        // Initialize admin after successful connection
-                        // await initAdmin()
-                    } catch (error) {
-                        console.error(\`❌ MongoDB connection error: \${error.message}\`)
-                        process.exit(1)
-                    }
-                }
+    if (database === 'MongoDB (Mongoose)') {
+        pkg.dependencies = pkg.dependencies || {};
+        pkg.dependencies.mongoose = '^8.0.0';
 
-                export default connectDB`;
-                if (!fs.existsSync(targetConfigDir)) fs.mkdirSync(targetConfigDir, { recursive: true });
-                fs.writeFileSync(dbConfigPath, mongooseContent);
+        const mongooseContent = `import mongoose from "mongoose"
 
-            } else if (database === 'PostgreSQL (Sequelize)') {
-                pkg.dependencies = pkg.dependencies || {};
-                pkg.dependencies.sequelize = '^6.35.0';
-                pkg.dependencies.pg = '^8.11.3';
-                pkg.dependencies.pg_hstore = '^2.3.4';
+const options = {
+    serverSelectionTimeoutMS: 10000,
+    dbName: '',
+}
 
-                const sequelizeContent = `import { Sequelize } from "sequelize"
+const connectDB = async () => {
+    try {
+        await mongoose.connect('', options)
+        console.log(\`✅ MongoDB connected!\`)
+    } catch (error) {
+        console.error(\`❌ MongoDB connection error: \${error.message}\`)
+        process.exit(1)
+    }
+}
+
+export default connectDB`;
+        fs.writeFileSync(dbConfigPath, mongooseContent);
+
+    } else if (database === 'PostgreSQL (Sequelize)') {
+        pkg.dependencies = pkg.dependencies || {};
+        pkg.dependencies.sequelize = '^6.35.0';
+        pkg.dependencies.pg = '^8.11.3';
+        pkg.dependencies.pg_hstore = '^2.3.4';
+
+        const sequelizeContent = `import { Sequelize } from "sequelize"
 
 export const sequelize = new Sequelize(
     '',          // DB name
@@ -157,34 +154,65 @@ export const sequelize = new Sequelize(
 
 export default sequelize
 `;
-                if (!fs.existsSync(targetConfigDir)) fs.mkdirSync(targetConfigDir, { recursive: true });
-                fs.writeFileSync(dbConfigPath, sequelizeContent);
+        fs.writeFileSync(dbConfigPath, sequelizeContent);
 
-            } else {
-                 if (!fs.existsSync(targetConfigDir)) fs.mkdirSync(targetConfigDir, { recursive: true });
-                 fs.writeFileSync(dbConfigPath, '// No database configured\\n');
-            }
+    } else {
+        fs.writeFileSync(dbConfigPath, '// No database configured\n');
+    }
 
-            fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2));
-        }
+    // Save updated package.json
+    fs.writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2));
+}
 
-        // Install dependencies
-        const installSpinner = ora(`Installing dependencies using ${packageManager}...`).start();
-        try {
-            execSync(`${packageManager} install`, { cwd: targetPath, stdio: 'pipe' });
-            installSpinner.succeed('Dependencies installed successfully.');
-        } catch (err) {
-            installSpinner.fail('Failed to install dependencies.');
-        }
+function installDependencies(targetPath, packageManager) {
+    const installSpinner = ora(`Installing dependencies using ${packageManager}...`).start();
+    try {
+        execSync(`${packageManager} install`, { cwd: targetPath, stdio: 'pipe' });
+        installSpinner.succeed('Dependencies installed successfully.');
+    } catch (err) {
+        installSpinner.fail('Failed to install dependencies.');
+        console.error(err);
+    }
+}
 
-        console.log(`\n${chalk.green('Success!')} Created ${path.basename(targetPath)} at ${targetPath}`);
-        console.log('\nInside that directory, you can run several commands:\n');
-        console.log(`  ${chalk.cyan(`${packageManager} run dev`)}`);
-        console.log('    Starts the development server with nodemon.\n');
-        console.log('We suggest that you begin by typing:\n');
-        console.log(`  ${chalk.cyan('cd')} ${targetDir}`);
-        console.log(`  ${chalk.cyan(`${packageManager} run dev`)}\n`);
+function showSuccessMessage(targetDir, targetPath, packageManager) {
+    console.log(`\n${chalk.green('Success!')} Created ${path.basename(targetPath)} at ${targetPath}`);
+    console.log('\nInside that directory, you can run several commands:\n');
+    console.log(`  ${chalk.cyan(`${packageManager} run dev`)}`);
+    console.log('    Starts the development server with nodemon.\n');
+    console.log('We suggest that you begin by typing:\n');
+    console.log(`  ${chalk.cyan('cd')} ${targetDir}`);
+    console.log(`  ${chalk.cyan(`${packageManager} run dev`)}\n`);
+}
 
+// ==========================================
+// CLI Application
+// ==========================================
+
+program
+    .name('create-node-app')
+    .description('Scaffold a new Node.js application')
+    .argument('[project-directory]', 'Directory to create the project in')
+    .action(async (projectDirectory) => {
+
+        // 1. Prompt User
+        const { targetDir, packageManager, database } = await promptUser(projectDirectory);
+        const targetPath = path.resolve(process.cwd(), targetDir);
+        const templateDir = path.join(__dirname, '..', 'template');
+
+        console.log(`\nCreating a new Node.js app in ${chalk.green(targetPath)}\n`);
+
+        // 2. Copy Template Files
+        copyTemplateFiles(templateDir, targetPath);
+
+        // 3. Configure Database
+        configureDatabase(targetPath, database);
+
+        // 4. Install Dependencies
+        installDependencies(targetPath, packageManager);
+
+        // 5. Success Message
+        showSuccessMessage(targetDir, targetPath, packageManager);
     });
 
 program.parse(process.argv);
